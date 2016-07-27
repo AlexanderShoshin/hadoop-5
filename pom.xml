@@ -9,6 +9,7 @@
     
     <modules>
         <module>yarn-client</module>
+        <module>yarn-am</module>
     </modules>
     
     <properties>
