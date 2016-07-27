@@ -1,0 +1,24 @@
+<!doctype html>
+<html ng-app="yarnJob">
+    <head>
+        <meta charset="utf-8">
+        <title>Application master page</title>
+        <link rel="stylesheet" type="text/css" href="lib/bootstrap/bootstrap.min.css">
+        <link rel="stylesheet" type="text/css" href="css/angular.css">
+        <script type="text/javascript" src="lib/angular/angular.min.js"></script>
+        <script type="text/javascript" src="lib/angular/angular-route.min.js"></script>
+        <script type="text/javascript" src="js/app.js"></script>
+    </head>
+    <body ng-controller="AMController as master">
+        <button class="btn btn-lg" type="button" ng-click="master.ping()">
+            Ping
+        </button>
+        <button class="btn btn-lg" type="button" ng-click="master.sort()">
+            Start sorting
+        </button>
+        <button class="btn btn-lg" type="button" ng-click="master.terminate()">
+            Terminate
+        </button>
+        <p>{{master.status}}</p>
+    </body>
+</html>
