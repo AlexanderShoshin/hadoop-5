@@ -394,8 +394,7 @@ public class Client {
       classPathEnv.append(ApplicationConstants.CLASS_PATH_SEPARATOR);
       classPathEnv.append(c.trim());
     }
-    classPathEnv.append(ApplicationConstants.CLASS_PATH_SEPARATOR).append(
-      "./log4j.properties");
+    classPathEnv.append(ApplicationConstants.CLASS_PATH_SEPARATOR).append("./log4j.properties");
 
     // add the runtime classpath needed for tests to work
     if (conf.getBoolean(YarnConfiguration.IS_MINI_YARN_CLUSTER, false)) {
@@ -412,21 +411,9 @@ public class Client {
     LOG.info("Setting up app master command");
     vargs.add(Environment.JAVA_HOME.$$() + "/bin/java");
     // Set Xmx based on am memory size
-    vargs.add("-Xmx" + amMemory + "m");
+    vargs.add("-jar");
     // Set class name 
-    vargs.add(appMasterMainClass);
-    // Set params for Application Master
-    vargs.add("--container_memory " + String.valueOf(containerMemory));
-    vargs.add("--container_vcores " + String.valueOf(containerVirtualCores));
-    vargs.add("--num_containers " + String.valueOf(numContainers));
-    vargs.add("--priority " + String.valueOf(shellCmdPriority));
-
-    for (Map.Entry<String, String> entry : shellEnv.entrySet()) {
-      vargs.add("--shell_env " + entry.getKey() + "=" + entry.getValue());
-    }			
-    if (debugFlag) {
-      vargs.add("--debug");
-    }
+    vargs.add(appMasterJarPath);
 
     vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stdout");
     vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stderr");
@@ -521,7 +508,7 @@ public class Client {
 
       // Check app status every 1 second.
       try {
-        Thread.sleep(1000);
+        Thread.sleep(5000);
       } catch (InterruptedException e) {
         LOG.debug("Thread sleep in monitoring loop interrupted");
       }

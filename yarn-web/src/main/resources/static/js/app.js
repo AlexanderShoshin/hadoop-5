@@ -1,22 +1,40 @@
 (function(){
     var app = angular.module("yarnJob", ["ngRoute"]);
-    app.controller("AMController", ["$http", "$route", function($http, $route){
+    app.controller("AMController", ["$http", function($http){
         var master = this;
-        master.status = "123";
-        this.ping = function() {
-            $http.get("/ping").then(function mySucces(response) {
-                master.status = response.data.status;
+        master.status = "waiting for connection";
+        master.memory = 256;
+        master.cores = 1;
+        master.containers = 1;
+        master.info = {maxMem: 0, maxVCores: 0};
+        master.taskStatus = {containersTotal: 0, containersCompleted: 0, inProgress: false};
+        
+        this.getInfo = function() {
+            $http.get("/getInfo").then(function mySucces(response) {
+                master.status = "connected";
+                master.info = response.data;
             }, function myError(response) {
-                master.status = "connection error - " + response.statusText;
+                master.status = "connection error";
             });
         };
         this.terminate = function() {
-            $http.get("/terminate").then(function mySucces(response) {
-                $route.reload();
-            });
+            $http.post("/terminate");
         };
         this.sort = function() {
-            $http.get("/sort");
+            $http.get("/startSorting", {
+                params: {
+                    memory:  master.memory,
+                    cores:  master.cores,
+                    containers: master.containers
+                }
+            });
         };
+        this.getTaskStatus = function() {
+            $http.get("/getTaskStatus").then(function mySucces(response) {
+                master.taskStatus = response.data;
+            });
+        };
+        master.getInfo();
+        setInterval(this.getTaskStatus, 1000);
     }]);
 })();
