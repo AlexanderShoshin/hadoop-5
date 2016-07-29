@@ -1,17 +1,6 @@
 package shoshin.alex.yarn;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.GnuParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.*;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
@@ -21,33 +10,27 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
 import org.apache.hadoop.yarn.api.ApplicationConstants.Environment;
 import org.apache.hadoop.yarn.api.protocolrecords.GetNewApplicationResponse;
-import org.apache.hadoop.yarn.api.records.ApplicationId;
-import org.apache.hadoop.yarn.api.records.ApplicationReport;
-import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
-import org.apache.hadoop.yarn.api.records.ContainerLaunchContext;
-import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
-import org.apache.hadoop.yarn.api.records.LocalResource;
-import org.apache.hadoop.yarn.api.records.LocalResourceType;
-import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
-import org.apache.hadoop.yarn.api.records.Priority;
-import org.apache.hadoop.yarn.api.records.Resource;
-import org.apache.hadoop.yarn.api.records.YarnApplicationState;
+import org.apache.hadoop.yarn.api.records.*;
 import org.apache.hadoop.yarn.client.api.YarnClient;
 import org.apache.hadoop.yarn.client.api.YarnClientApplication;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.util.ConverterUtils;
+import shoshin.alex.yarn.utils.HDFSUtils;
+
+import java.io.IOException;
+import java.util.*;
 
 @InterfaceAudience.Public
 @InterfaceStability.Unstable
 public class Client {
     private static final Log LOG = LogFactory.getLog(Client.class);
     private static final String APP_NAME = "yarn-application";
-    private static final int AM_PRIORITY = 0;
     private static final String AM_QUEUE = "default";
     private static final String AM_HDFS_JAR = "AppMaster.jar";
     private static final String CON_HDFS_JAR = "Container.jar";
     private static final boolean KEEP_CONTAINERS = false;
+    private static final int AM_PRIORITY = 0;
     private int amMemory = 256;
     private int amCores = 1;
     private String amLocalJar = "";
@@ -58,40 +41,34 @@ public class Client {
     private YarnClient yarnClient;
     
     public static void main(String[] args) {
-        boolean result = false;
+        boolean completeSuccessfully = false;
         try {
             LOG.info("Initializing client");
             Client client = new Client();
             try {
-                LOG.info("0");
-                boolean inited = client.init(args);
-                if (!inited) {
-                    LOG.info("1");
+                if (!client.init(args)) {
                     System.exit(0);
                 }
             } catch (IllegalArgumentException e) {
-                LOG.info("2");
                 client.printUsage();
                 System.exit(-1);
             }
-            LOG.info("3");
-            result = client.run();
+            completeSuccessfully = client.run();
         } catch (Throwable exc) {
-            LOG.info("5");
             System.exit(1);
         }
-        if (result) {
+        if (completeSuccessfully) {
             System.exit(0);
         } else {
             System.exit(2);
         }
     }
 
-    public Client() throws Exception {
+    private Client() throws Exception {
         this(new YarnConfiguration());
     }
 
-    public Client(Configuration conf) throws Exception {
+    private Client(Configuration conf) throws Exception {
         this.conf = conf;
         yarnClient = YarnClient.createYarnClient();
         yarnClient.init(conf);
@@ -104,7 +81,7 @@ public class Client {
         new HelpFormatter().printHelp("Client", opts);
     }
     
-    public boolean init(String[] args) throws ParseException {
+    private boolean init(String[] args) throws ParseException {
         CommandLine cliParser = new GnuParser().parse(opts, args);
 
         if (!cliParser.hasOption("amJar")) {
@@ -118,7 +95,7 @@ public class Client {
         return true;
     }
     
-    public boolean run() throws IOException, YarnException {
+    private boolean run() throws IOException, YarnException {
         LOG.info("Running Client");
         yarnClient.start();
         
@@ -143,11 +120,11 @@ public class Client {
         appContext.setKeepContainersAcrossApplicationAttempts(KEEP_CONTAINERS);
         appContext.setApplicationName(APP_NAME);
         
-        Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
-        HDFSUtils hdfs = new HDFSUtils(conf);
-        FileStatus resource = hdfs.copyToHDFS(amLocalJar, APP_NAME + "/" + appId + "/" + AM_HDFS_JAR);
+        Map<String, LocalResource> localResources = new HashMap<>();
+        HDFSUtils hdfsUtils = new HDFSUtils(conf);
+        FileStatus resource = hdfsUtils.copyToHDFS(amLocalJar, APP_NAME + "/" + appId + "/" + AM_HDFS_JAR);
         addToLocalResources(resource, localResources);
-        containerRes = hdfs.copyToHDFS(conLocalJar, APP_NAME + "/" + appId + "/" + CON_HDFS_JAR);
+        containerRes = hdfsUtils.copyToHDFS(conLocalJar, APP_NAME + "/" + appId + "/" + CON_HDFS_JAR);
         addToLocalResources(containerRes, localResources);
 
         Map<String, String> env = setupEnvironment();
@@ -171,8 +148,8 @@ public class Client {
     }
 
     private boolean monitorApplication(ApplicationId appId) throws YarnException, IOException {
-        String lastAppStatus = "";
-        String lastFinalStatus = "";
+        YarnApplicationState lastAppStatus = null;
+        FinalApplicationStatus lastFinalStatus = null;
         while (true) {
             try {
                 Thread.sleep(5000);
@@ -183,7 +160,9 @@ public class Client {
             ApplicationReport report = yarnClient.getApplicationReport(appId);
             YarnApplicationState appStatus = report.getYarnApplicationState();
             FinalApplicationStatus finalStatus = report.getFinalApplicationStatus();
-            if (!lastAppStatus.equals(appStatus) || !lastFinalStatus.equals(finalStatus)) {
+            if (lastAppStatus != appStatus || lastFinalStatus != finalStatus) {
+                lastAppStatus = appStatus;
+                lastFinalStatus = finalStatus;
                 LOG.info(String.format("%1$s app status changed: appStatus=%2$s, finalStatus=%3$s",
                                         appId.getId(), appStatus.toString(), finalStatus.toString()));
             }
@@ -212,7 +191,7 @@ public class Client {
     }
 
     private Map<String, String> setupEnvironment() {
-        Map<String, String> env = new HashMap<String, String>();
+        Map<String, String> env = new HashMap<>();
         StringBuilder classPathEnv = new StringBuilder(Environment.CLASSPATH.$$());
         for (String c : conf.getStrings(
                 YarnConfiguration.YARN_APPLICATION_CLASSPATH,
@@ -227,21 +206,19 @@ public class Client {
     }
 
     private List<String> setupCommands() {
-        List<String> commands = new ArrayList<String>();
-        List<CharSequence> vargs = new LinkedList<CharSequence>();
+        List<String> commands = new ArrayList<>();
+        List<String> args = new LinkedList<>();
 
-        vargs.add(Environment.JAVA_HOME.$$() + "/bin/java");
-        //vargs.add("-cp " + Environment.CLASSPATH.$$() + ":" +AM_HDFS_JAR);
-        //vargs.add("shoshin.alex.app.ApplicationMaster");
-        vargs.add("-jar");
-        vargs.add(AM_HDFS_JAR);
-        vargs.add(containerRes.getPath().toString());
-        vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stdout");
-        vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stderr");
+        args.add(Environment.JAVA_HOME.$$() + "/bin/java");
+        args.add("-jar");
+        args.add(AM_HDFS_JAR);
+        args.add(containerRes.getPath().toString());
+        args.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stdout");
+        args.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stderr");
 
         StringBuilder command = new StringBuilder();
-        for (CharSequence str : vargs) {
-            command.append(str).append(" ");
+        for (String argument : args) {
+            command.append(argument).append(" ");
         }
         commands.add(command.toString());
         
