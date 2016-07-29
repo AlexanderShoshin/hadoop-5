@@ -2,9 +2,9 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>shoshin.alex</groupId>
-    <artifactId>yarn-web</artifactId>
+    <artifactId>yarn-webAM</artifactId>
     <version>1.0.0</version>
-    <name>yarn-web</name>
+    <name>yarn-webAM</name>
 
     <parent>
         <groupId>org.springframework.boot</groupId>

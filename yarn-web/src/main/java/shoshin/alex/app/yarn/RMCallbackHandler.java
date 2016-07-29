@@ -1,7 +1,5 @@
 package shoshin.alex.app.yarn;
 
-import java.io.IOException;
-import java.util.List;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.yarn.api.records.Container;
@@ -9,23 +7,26 @@ import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.client.api.async.AMRMClientAsync;
 
+import java.io.IOException;
+import java.util.List;
+
 class RMCallbackHandler implements AMRMClientAsync.CallbackHandler {
     private static final Log LOG = LogFactory.getLog(RMCallbackHandler.class);
-    private YarnApplication yarnApp;
+    private ExecutionManager executionManager;
 
-    public RMCallbackHandler(YarnApplication yarnSetup) {
-        this.yarnApp = yarnSetup;
+    public RMCallbackHandler(ExecutionManager executionManager) {
+        this.executionManager = executionManager;
     }
 
     @Override
     public void onContainersCompleted(List<ContainerStatus> completedContainers) {
         LOG.info(completedContainers.size() + " containers was completed");
         for (ContainerStatus containerStatus : completedContainers) {
-            yarnApp.numCompletedContainers.incrementAndGet();
+            executionManager.numCompletedContainers.incrementAndGet();
             LOG.info("Container " + containerStatus.getContainerId() + " completed");
         }
-        if (yarnApp.numCompletedContainers.get() == yarnApp.numTotalContainers.get()) {
-            yarnApp.inProgress = false;
+        if (executionManager.numCompletedContainers.get() == executionManager.numRequestedContainers.get()) {
+            executionManager.inProgress = false;
         }
     }
 
@@ -33,24 +34,26 @@ class RMCallbackHandler implements AMRMClientAsync.CallbackHandler {
     public void onContainersAllocated(List<Container> allocatedContainers) {
         LOG.info(allocatedContainers.size() + " containers was allocated by RM");
         for (Container allocatedContainer : allocatedContainers) {
-            tryToLaunchContainer(allocatedContainer);
+            if (executionManager.numAllocatedContainers.get() < executionManager.numRequestedContainers.get()) {
+                tryToLaunchContainer(allocatedContainer);
+            }
         }
     }
     
     private void tryToLaunchContainer(Container container) {
         LaunchContainerRunnable runnableLaunchContainer;
         try {
-            runnableLaunchContainer = new LaunchContainerRunnable(container, yarnApp.nmClientAsync, yarnApp.executorContainer);
+            runnableLaunchContainer = new LaunchContainerRunnable(container, executionManager.nmClientAsync, executionManager.executorContainer);
             Thread launchThread = new Thread(runnableLaunchContainer);
             launchThread.start();
         } catch (IOException ex) {
-            LOG.error("fail to launch container: " + ex.getMessage());
+            LOG.error("Fail to launch container: " + ex.getMessage());
         }
     }
 
     @Override
     public void onShutdownRequest() {
-        yarnApp.inProgress = false;
+        executionManager.inProgress = false;
     }
 
     @Override
@@ -59,11 +62,12 @@ class RMCallbackHandler implements AMRMClientAsync.CallbackHandler {
 
     @Override
     public float getProgress() {
-        return (float) 0.5;
+        return (float) executionManager.numCompletedContainers.get() / executionManager.numRequestedContainers.get();
     }
 
     @Override
-    public void onError(Throwable thrwbl) {
-        yarnApp.inProgress = false;
+    public void onError(Throwable exc) {
+        executionManager.inProgress = false;
+        LOG.error(exc.getMessage());
     }
 }

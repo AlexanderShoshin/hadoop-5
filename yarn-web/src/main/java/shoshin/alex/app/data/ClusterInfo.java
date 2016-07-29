@@ -1,14 +1,10 @@
 package shoshin.alex.app.data;
 
-/**
- *
- * @author Alexander_Shoshin
- */
-public class ClasterInfo {
+public class ClusterInfo {
     private final int maxMem;
     private final int maxVCores;
     
-    public ClasterInfo(int maxMem, int maxVCores) {
+    public ClusterInfo(int maxMem, int maxVCores) {
         this.maxMem = maxMem;
         this.maxVCores = maxVCores;
     }

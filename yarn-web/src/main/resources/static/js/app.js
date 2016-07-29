@@ -20,9 +20,9 @@
         this.terminate = function() {
             $http.post("/terminate");
         };
-        this.sort = function() {
+        this.startTasks = function() {
             master.taskStatus.inProgress = true;
-            $http.get("/startSorting", {
+            $http.get("/startTasks", {
                 params: {
                     memory:  master.memory,
                     cores:  master.cores,

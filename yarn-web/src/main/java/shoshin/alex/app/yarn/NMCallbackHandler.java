@@ -1,23 +1,20 @@
 package shoshin.alex.app.yarn;
 
-import java.nio.ByteBuffer;
-import java.util.Map;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.client.api.async.NMClientAsync;
 
-/**
- *
- * @author Alexander_Shoshin
- */
+import java.nio.ByteBuffer;
+import java.util.Map;
+
 class NMCallbackHandler implements NMClientAsync.CallbackHandler {
     private static final Log LOG = LogFactory.getLog(NMCallbackHandler.class);
-    private YarnApplication yarnSetup;
+    private ExecutionManager executionManager;
     
-    public NMCallbackHandler(YarnApplication yarnSetup) {
-        this.yarnSetup = yarnSetup;
+    NMCallbackHandler(ExecutionManager executionManager) {
+        this.executionManager = executionManager;
     }
     
     @Override
@@ -37,7 +34,7 @@ class NMCallbackHandler implements NMClientAsync.CallbackHandler {
 
     @Override
     public void onStartContainerError(ContainerId id, Throwable exc) {
-        yarnSetup.numCompletedContainers.incrementAndGet();
+        executionManager.numCompletedContainers.incrementAndGet();
         LOG.info("Container " + id + " was not started");
     }
 
