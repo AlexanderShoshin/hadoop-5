@@ -12,17 +12,12 @@ import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
 import org.apache.hadoop.yarn.api.ApplicationConstants.Environment;
 import org.apache.hadoop.yarn.api.protocolrecords.GetNewApplicationResponse;
@@ -51,12 +46,13 @@ public class Client {
     private static final int AM_PRIORITY = 0;
     private static final String AM_QUEUE = "default";
     private static final String AM_HDFS_JAR = "AppMaster.jar";
-    private static final String SHELL_COMMAND_PATH = "shellCommands";
-    private static final String SHELL_COMMAND = "/bin/date";
+    private static final String CON_HDFS_JAR = "Container.jar";
     private static final boolean KEEP_CONTAINERS = false;
     private int amMemory = 256;
     private int amCores = 1;
     private String amLocalJar = "";
+    private String conLocalJar = "";
+    private FileStatus containerRes;
     private Options opts;
     private Configuration conf;
     private YarnClient yarnClient;
@@ -67,15 +63,21 @@ public class Client {
             LOG.info("Initializing client");
             Client client = new Client();
             try {
-                if (!client.init(args)) {
+                LOG.info("0");
+                boolean inited = client.init(args);
+                if (!inited) {
+                    LOG.info("1");
                     System.exit(0);
                 }
             } catch (IllegalArgumentException e) {
+                LOG.info("2");
                 client.printUsage();
                 System.exit(-1);
             }
+            LOG.info("3");
             result = client.run();
-        } catch (Throwable t) {
+        } catch (Throwable exc) {
+            LOG.info("5");
             System.exit(1);
         }
         if (result) {
@@ -94,7 +96,8 @@ public class Client {
         yarnClient = YarnClient.createYarnClient();
         yarnClient.init(conf);
         opts = new Options();
-        opts.addOption("jar", true, "Jar file containing the application master");
+        opts.addOption("amJar", true, "Jar file containing the application master");
+        opts.addOption("conJar", true, "Jar file containing the execution container");
     }
     
     private void printUsage() {
@@ -104,10 +107,13 @@ public class Client {
     public boolean init(String[] args) throws ParseException {
         CommandLine cliParser = new GnuParser().parse(opts, args);
 
-        if (!cliParser.hasOption("jar")) {
+        if (!cliParser.hasOption("amJar")) {
             throw new IllegalArgumentException("No jar file specified for application master");
+        } else if (!cliParser.hasOption("conJar")) {
+            throw new IllegalArgumentException("No jar file specified for execution container");
         }
-        amLocalJar = cliParser.getOptionValue("jar");
+        amLocalJar = cliParser.getOptionValue("amJar");
+        conLocalJar = cliParser.getOptionValue("conJar");
 
         return true;
     }
@@ -136,16 +142,13 @@ public class Client {
 
         appContext.setKeepContainersAcrossApplicationAttempts(KEEP_CONTAINERS);
         appContext.setApplicationName(APP_NAME);
-
-        // set local resources for the application master		
+        
         Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
-        FileSystem fs = FileSystem.get(conf);
-        addToLocalResources(fs, amLocalJar, AM_HDFS_JAR, appId.toString(), localResources, null);
-
-
-        if (!SHELL_COMMAND.isEmpty()) {
-            addToLocalResources(fs, null, SHELL_COMMAND_PATH, appId.toString(), localResources, SHELL_COMMAND);
-        }
+        HDFSUtils hdfs = new HDFSUtils(conf);
+        FileStatus resource = hdfs.copyToHDFS(amLocalJar, APP_NAME + "/" + appId + "/" + AM_HDFS_JAR);
+        addToLocalResources(resource, localResources);
+        containerRes = hdfs.copyToHDFS(conLocalJar, APP_NAME + "/" + appId + "/" + CON_HDFS_JAR);
+        addToLocalResources(containerRes, localResources);
 
         Map<String, String> env = setupEnvironment();
         List<String> commands = setupCommands();
@@ -163,11 +166,13 @@ public class Client {
         
         LOG.info("Submitting application to YARN");
         yarnClient.submitApplication(appContext);
-
+        
         return monitorApplication(appId);
     }
 
     private boolean monitorApplication(ApplicationId appId) throws YarnException, IOException {
+        String lastAppStatus = "";
+        String lastFinalStatus = "";
         while (true) {
             try {
                 Thread.sleep(5000);
@@ -176,12 +181,14 @@ public class Client {
             }
 
             ApplicationReport report = yarnClient.getApplicationReport(appId);
-            YarnApplicationState state = report.getYarnApplicationState();
+            YarnApplicationState appStatus = report.getYarnApplicationState();
             FinalApplicationStatus finalStatus = report.getFinalApplicationStatus();
-            LOG.debug(String.format("appId=%1$s, yarnAppState=%2$s, distributedFinalState=%3$s",
-                                     appId.getId(), state.toString(), finalStatus.toString()));
+            if (!lastAppStatus.equals(appStatus) || !lastFinalStatus.equals(finalStatus)) {
+                LOG.info(String.format("%1$s app status changed: appStatus=%2$s, finalStatus=%3$s",
+                                        appId.getId(), appStatus.toString(), finalStatus.toString()));
+            }
 
-            if (YarnApplicationState.FINISHED == state) {
+            if (YarnApplicationState.FINISHED == appStatus) {
                 if (FinalApplicationStatus.SUCCEEDED == finalStatus) {
                     LOG.info("Application has completed successfully.");
                     return true;
@@ -189,47 +196,31 @@ public class Client {
                     LOG.info("Application has completed unsuccessfully.");
                     return false;
                 }
-            } else if (YarnApplicationState.KILLED == state || YarnApplicationState.FAILED == state) {
+            } else if (YarnApplicationState.KILLED == appStatus || YarnApplicationState.FAILED == appStatus) {
                 LOG.info("Application was interrupted.");
                 return false;
             }
         }
     }
 
-    private void addToLocalResources(FileSystem fs, String fileSrcPath,
-            String fileDstPath, String appId, Map<String, LocalResource> localResources,
-            String resources) throws IOException {
-        String suffix = APP_NAME + "/" + appId + "/" + fileDstPath;
-        Path dst = new Path(fs.getHomeDirectory(), suffix);
-        if (fileSrcPath == null) {
-            FSDataOutputStream ostream = null;
-            try {
-                ostream = FileSystem .create(fs, dst, new FsPermission((short) 0710));
-                ostream.writeUTF(resources);
-            } finally {
-                IOUtils.closeQuietly(ostream);
-            }
-        } else {
-            fs.copyFromLocalFile(new Path(fileSrcPath), dst);
-        }
-        FileStatus scFileStatus = fs.getFileStatus(dst);
-        LocalResource scRsrc = LocalResource.newInstance(
-                        ConverterUtils.getYarnUrlFromURI(dst.toUri()),
+    private void addToLocalResources(FileStatus fileStatus, Map<String, LocalResource> localResources) throws IOException {
+        LocalResource resource = LocalResource.newInstance(
+                        ConverterUtils.getYarnUrlFromURI(fileStatus.getPath().toUri()),
                         LocalResourceType.FILE, LocalResourceVisibility.APPLICATION,
-                        scFileStatus.getLen(), scFileStatus.getModificationTime());
-        localResources.put(fileDstPath, scRsrc);
+                        fileStatus.getLen(), fileStatus.getModificationTime());
+        localResources.put(fileStatus.getPath().getName(), resource);
     }
 
     private Map<String, String> setupEnvironment() {
         Map<String, String> env = new HashMap<String, String>();
-        StringBuilder classPathEnv = new StringBuilder(Environment.CLASSPATH.$$())
-                .append(ApplicationConstants.CLASS_PATH_SEPARATOR).append("./*");
+        StringBuilder classPathEnv = new StringBuilder(Environment.CLASSPATH.$$());
         for (String c : conf.getStrings(
                 YarnConfiguration.YARN_APPLICATION_CLASSPATH,
                 YarnConfiguration.DEFAULT_YARN_CROSS_PLATFORM_APPLICATION_CLASSPATH)) {
             classPathEnv.append(ApplicationConstants.CLASS_PATH_SEPARATOR);
             classPathEnv.append(c.trim());
         }
+        classPathEnv.append(ApplicationConstants.CLASS_PATH_SEPARATOR).append("./*");
 
         env.put("CLASSPATH", classPathEnv.toString());
         return env;
@@ -240,8 +231,11 @@ public class Client {
         List<CharSequence> vargs = new LinkedList<CharSequence>();
 
         vargs.add(Environment.JAVA_HOME.$$() + "/bin/java");
+        //vargs.add("-cp " + Environment.CLASSPATH.$$() + ":" +AM_HDFS_JAR);
+        //vargs.add("shoshin.alex.app.ApplicationMaster");
         vargs.add("-jar");
         vargs.add(AM_HDFS_JAR);
+        vargs.add(containerRes.getPath().toString());
         vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stdout");
         vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stderr");
 
