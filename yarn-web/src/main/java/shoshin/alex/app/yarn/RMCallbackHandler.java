@@ -1,5 +1,6 @@
 package shoshin.alex.app.yarn;
 
+import java.io.IOException;
 import java.util.List;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -8,10 +9,6 @@ import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.client.api.async.AMRMClientAsync;
 
-/**
- *
- * @author Alexander_Shoshin
- */
 class RMCallbackHandler implements AMRMClientAsync.CallbackHandler {
     private static final Log LOG = LogFactory.getLog(RMCallbackHandler.class);
     private YarnApplication yarnApp;
@@ -36,13 +33,18 @@ class RMCallbackHandler implements AMRMClientAsync.CallbackHandler {
     public void onContainersAllocated(List<Container> allocatedContainers) {
         LOG.info(allocatedContainers.size() + " containers was allocated by RM");
         for (Container allocatedContainer : allocatedContainers) {
-            LaunchContainerRunnable runnableLaunchContainer
-                    = new LaunchContainerRunnable(allocatedContainer,
-                            //containerListener,
-                            yarnApp.nmClientAsync);
+            tryToLaunchContainer(allocatedContainer);
+        }
+    }
+    
+    private void tryToLaunchContainer(Container container) {
+        LaunchContainerRunnable runnableLaunchContainer;
+        try {
+            runnableLaunchContainer = new LaunchContainerRunnable(container, yarnApp.nmClientAsync, yarnApp.executorContainer);
             Thread launchThread = new Thread(runnableLaunchContainer);
-            yarnApp.launchThreads.add(launchThread);
             launchThread.start();
+        } catch (IOException ex) {
+            LOG.error("fail to launch container: " + ex.getMessage());
         }
     }
 

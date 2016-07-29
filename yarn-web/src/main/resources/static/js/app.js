@@ -1,5 +1,5 @@
 (function(){
-    var app = angular.module("yarnJob", ["ngRoute"]);
+    var app = angular.module("yarnJob", []);
     app.controller("AMController", ["$http", function($http){
         var master = this;
         master.status = "waiting for connection";
@@ -21,6 +21,7 @@
             $http.post("/terminate");
         };
         this.sort = function() {
+            master.taskStatus.inProgress = true;
             $http.get("/startSorting", {
                 params: {
                     memory:  master.memory,

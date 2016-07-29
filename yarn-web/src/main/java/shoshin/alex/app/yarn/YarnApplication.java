@@ -1,14 +1,21 @@
 package shoshin.alex.app.yarn;
 
+import java.io.File;
 import shoshin.alex.app.data.ClasterInfo;
 import shoshin.alex.app.ApplicationMaster;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterResponse;
 import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
@@ -22,25 +29,26 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import shoshin.alex.app.data.TaskStatus;
 
-/**
- *
- * @author Alexander_Shoshin
- */
 public class YarnApplication {
     private static final Log LOG = LogFactory.getLog(ApplicationMaster.class);
     public String availableResources;
     AMRMClientAsync amRMClient;
     NMClientAsync nmClientAsync;
-    private NMCallbackHandler containerListener;
-    private Configuration conf = new YarnConfiguration();
-    private RegisterApplicationMasterResponse registrationData;
-    private int requestPriority = 10;
+    private final NMCallbackHandler containerListener;
+    private final Configuration conf = new YarnConfiguration();
+    private final RegisterApplicationMasterResponse registrationData;
+    private final int requestPriority = 10;
     AtomicInteger numTotalContainers = new AtomicInteger(0);
-    List<Thread> launchThreads = new ArrayList<Thread>();
     AtomicInteger numCompletedContainers = new AtomicInteger(0);
     volatile boolean inProgress;
+    Path executorContainer;
+    
 
-    public YarnApplication() throws YarnException, IOException {
+    public YarnApplication(String[] args) throws YarnException, URISyntaxException, IOException {
+        if (args.length != 0) {
+            executorContainer = new Path(args[0]);
+        }
+        
         containerListener = new NMCallbackHandler(this);
         nmClientAsync = new NMClientAsyncImpl(containerListener);
         nmClientAsync.init(conf);
