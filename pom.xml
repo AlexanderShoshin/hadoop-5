@@ -9,7 +9,6 @@
     
     <modules>
         <module>yarn-client</module>
-        <module>yarn-am</module>
         <module>yarn-web</module>
         <module>yarn-container</module>
     </modules>
